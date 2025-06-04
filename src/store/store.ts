@@ -11,6 +11,9 @@ export interface User {
   specialization?: string;
   language?: string[];
   availableSlots?: { day: string; slots: string[] }[];
+  status?: 'active' | 'inactive';
+  joinDate?: string;
+  lastActive?: string;
 }
 
 export interface HealthIssue {
@@ -19,6 +22,7 @@ export interface HealthIssue {
   category: 'NHM' | 'Ayush';
   description: string;
   icon: string;
+  status: 'active' | 'inactive';
 }
 
 export interface ConsultationRequest {
@@ -67,6 +71,21 @@ export interface HealthRecord {
   updatedAt: string;
 }
 
+export interface AdminSettings {
+  allowNewRegistrations: boolean;
+  requirePrescriptionApproval: boolean;
+  enableEmergencyConsultations: boolean;
+  maxDailyConsultations: number;
+  consultationTimeSlots: string[];
+  workingDays: string[];
+  consultationFees: {
+    general: number;
+    specialist: number;
+    emergency: number;
+  };
+  paymentMethods: string[];
+}
+
 interface AppState {
   // Users
   users: User[];
@@ -80,10 +99,22 @@ interface AppState {
   
   // Health Records
   healthRecords: HealthRecord[];
+
+  // Admin Settings
+  adminSettings: AdminSettings;
   
   // Actions
   login: (email: string, password: string, role: 'patient' | 'doctor' | 'admin') => Promise<boolean>;
   logout: () => void;
+  
+  // Admin Actions
+  addDoctor: (doctor: Omit<User, 'id' | 'role'>) => void;
+  updateDoctor: (id: string, updates: Partial<User>) => void;
+  removeDoctor: (id: string) => void;
+  updateAdminSettings: (settings: Partial<AdminSettings>) => void;
+  addHealthIssue: (issue: Omit<HealthIssue, 'id' | 'status'>) => void;
+  updateHealthIssue: (id: string, updates: Partial<HealthIssue>) => void;
+  toggleHealthIssueStatus: (id: string) => void;
   
   // Consultation Actions
   requestConsultation: (consultation: Omit<ConsultationRequest, 'id' | 'status' | 'createdAt' | 'updatedAt'>) => string;
@@ -105,6 +136,9 @@ const mockUsers: User[] = [
     role: 'patient',
     avatar: 'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg',
     language: ['English', 'Malayalam'],
+    status: 'active',
+    joinDate: '2024-01-15',
+    lastActive: new Date().toISOString(),
   },
   {
     id: 'doc1',
@@ -119,6 +153,9 @@ const mockUsers: User[] = [
       { day: 'Wednesday', slots: ['10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM'] },
       { day: 'Friday', slots: ['10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM'] },
     ],
+    status: 'active',
+    joinDate: '2024-01-01',
+    lastActive: new Date().toISOString(),
   },
   {
     id: 'admin1',
@@ -126,6 +163,9 @@ const mockUsers: User[] = [
     email: 'admin@example.com',
     role: 'admin',
     avatar: 'https://images.pexels.com/photos/5407206/pexels-photo-5407206.jpeg',
+    status: 'active',
+    joinDate: '2024-01-01',
+    lastActive: new Date().toISOString(),
   },
 ];
 
@@ -136,6 +176,7 @@ const mockHealthIssues: HealthIssue[] = [
     category: 'NHM',
     description: 'Mental health concerns related to anxiety, stress, or depression',
     icon: 'mental_health',
+    status: 'active',
   },
   {
     id: 'issue2',
@@ -143,6 +184,7 @@ const mockHealthIssues: HealthIssue[] = [
     category: 'NHM',
     description: 'Recurring headaches including migraines and tension headaches',
     icon: 'headache',
+    status: 'active',
   },
   {
     id: 'issue3',
@@ -150,8 +192,31 @@ const mockHealthIssues: HealthIssue[] = [
     category: 'Ayush',
     description: 'Problems related to digestion, acidity, or gastric discomfort',
     icon: 'stomach',
+    status: 'active',
   },
 ];
+
+const defaultAdminSettings: AdminSettings = {
+  allowNewRegistrations: true,
+  requirePrescriptionApproval: true,
+  enableEmergencyConsultations: true,
+  maxDailyConsultations: 20,
+  consultationTimeSlots: [
+    '09:00 AM',
+    '10:00 AM',
+    '11:00 AM',
+    '02:00 PM',
+    '03:00 PM',
+    '04:00 PM',
+  ],
+  workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+  consultationFees: {
+    general: 50,
+    specialist: 100,
+    emergency: 150,
+  },
+  paymentMethods: ['Credit Card', 'Debit Card', 'Net Banking', 'UPI'],
+};
 
 export const useStore = create<AppState>((set, get) => ({
   // Initial State
@@ -160,6 +225,7 @@ export const useStore = create<AppState>((set, get) => ({
   healthIssues: mockHealthIssues,
   consultations: [],
   healthRecords: [],
+  adminSettings: defaultAdminSettings,
 
   // User Actions
   login: async (email, password, role) => {
@@ -173,6 +239,76 @@ export const useStore = create<AppState>((set, get) => ({
 
   logout: () => {
     set({ currentUser: null });
+  },
+
+  // Admin Actions
+  addDoctor: (doctor) => {
+    const newDoctor: User = {
+      ...doctor,
+      id: uuidv4(),
+      role: 'doctor',
+      status: 'active',
+      joinDate: new Date().toISOString(),
+      lastActive: new Date().toISOString(),
+    };
+
+    set(state => ({
+      users: [...state.users, newDoctor],
+    }));
+  },
+
+  updateDoctor: (id, updates) => {
+    set(state => ({
+      users: state.users.map(u =>
+        u.id === id && u.role === 'doctor'
+          ? { ...u, ...updates, lastActive: new Date().toISOString() }
+          : u
+      ),
+    }));
+  },
+
+  removeDoctor: (id) => {
+    set(state => ({
+      users: state.users.map(u =>
+        u.id === id && u.role === 'doctor'
+          ? { ...u, status: 'inactive', lastActive: new Date().toISOString() }
+          : u
+      ),
+    }));
+  },
+
+  updateAdminSettings: (settings) => {
+    set(state => ({
+      adminSettings: { ...state.adminSettings, ...settings },
+    }));
+  },
+
+  addHealthIssue: (issue) => {
+    const newIssue: HealthIssue = {
+      ...issue,
+      id: uuidv4(),
+      status: 'active',
+    };
+
+    set(state => ({
+      healthIssues: [...state.healthIssues, newIssue],
+    }));
+  },
+
+  updateHealthIssue: (id, updates) => {
+    set(state => ({
+      healthIssues: state.healthIssues.map(i =>
+        i.id === id ? { ...i, ...updates } : i
+      ),
+    }));
+  },
+
+  toggleHealthIssueStatus: (id) => {
+    set(state => ({
+      healthIssues: state.healthIssues.map(i =>
+        i.id === id ? { ...i, status: i.status === 'active' ? 'inactive' : 'active' } : i
+      ),
+    }));
   },
 
   // Consultation Actions
